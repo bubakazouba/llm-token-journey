@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Journey of a Token — how an LLM actually works</title>
+<style>
+  :root{
+    --bg:#0e1116;--panel:#161a22;--panel2:#1c212c;--ink:#e9ecf3;--muted:#98a2b4;
+    --line:#2a303c;--accent:#7aa2ff;--accent2:#ffb454;--good:#5fd08a;--bad:#f07a5e;--purp:#c08cff;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: light){
+    :root{--bg:#f6f7fa;--panel:#fff;--panel2:#eef1f6;--ink:#1a1d26;--muted:#5b6474;--line:#e2e6ee;
+      --accent:#3b62d9;--accent2:#c07a12;--good:#178a4c;--bad:#c2431f;--purp:#7c3aed;}
+  }
+  :root[data-theme="dark"]{--bg:#0e1116;--panel:#161a22;--panel2:#1c212c;--ink:#e9ecf3;--muted:#98a2b4;--line:#2a303c;--accent:#7aa2ff;}
+  :root[data-theme="light"]{--bg:#f6f7fa;--panel:#fff;--panel2:#eef1f6;--ink:#1a1d26;--muted:#5b6474;--line:#e2e6ee;--accent:#3b62d9;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:22px 18px 90px}
+  header h1{font-size:clamp(22px,4vw,32px);margin:0 0 4px;letter-spacing:-.02em}
+  header p{color:var(--muted);margin:0 0 4px;font-size:15px}
+  .sentence{margin:14px 0 6px;font-size:15px;color:var(--muted)}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 4px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5;border-bottom:1px solid var(--line)}
+  .tab{padding:7px 13px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer;font-size:13.5px;font-weight:600;white-space:nowrap}
+  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tab .n{opacity:.6;font-weight:400;margin-right:5px}
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:16px;min-height:300px}
+  .stagehead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .stagehead h2{margin:0;font-size:20px;letter-spacing:-.01em}
+  .stepdots{display:flex;gap:5px}
+  .stepdots i{width:8px;height:8px;border-radius:50%;background:var(--line);display:block}
+  .stepdots i.on{background:var(--accent)}
+  .viz{margin:16px 0;min-height:150px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:center}
+  .explain{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:14px 16px;font-size:15px;margin-top:6px}
+  .explain b{color:var(--ink)}
+  .explain .k{color:var(--accent);font-weight:600}
+  .math{font-family:var(--mono);font-size:13px;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-top:10px;overflow-x:auto}
+  .math b{color:var(--accent2)}
+  .nav{display:flex;justify-content:space-between;margin-top:16px;gap:10px}
+  .btn{padding:9px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);cursor:pointer;font-size:14px;font-weight:600}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn:disabled{opacity:.4;cursor:default}
+  .dive{display:inline-block;margin-top:10px;font-size:13px;color:var(--accent);cursor:pointer;border:1px dashed var(--accent);border-radius:8px;padding:4px 10px;background:transparent}
+  /* token chip + vector */
+  .tok{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .chip{padding:6px 12px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);font-weight:700;font-size:15px}
+  .chip.hot{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .chip.faded{opacity:.4}
+  .vec{display:flex;gap:3px;align-items:flex-end;height:56px}
+  .vec .bar{width:11px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--accent),var(--purp));transition:height .5s ease}
+  .vec .bar.neg{background:linear-gradient(180deg,var(--bad),#8a3a2a)}
+  .vlabel{font-family:var(--mono);font-size:10px;color:var(--muted)}
+  .arrow{font-size:26px;color:var(--muted)}
+  .matrix{font-family:var(--mono);font-size:11px;color:var(--muted);border-left:2px solid var(--line);border-right:2px solid var(--line);padding:4px 8px;line-height:1.5}
+  .probs{display:flex;flex-direction:column;gap:6px;width:100%;max-width:340px}
+  .prob{display:flex;align-items:center;gap:8px;font-size:13px}
+  .prob .w{font-family:var(--mono);width:44px}
+  .prob .track{flex:1;height:16px;background:var(--panel2);border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  .prob .fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--purp))}
+  .prob.win .fill{background:linear-gradient(90deg,var(--good),#2f9d63)}
+  .prob .p{font-family:var(--mono);width:44px;text-align:right;color:var(--muted)}
+  svg .attnline{stroke:var(--accent);fill:none;transition:stroke-width .4s}
+  .note{color:var(--muted);font-size:12.5px;margin-top:14px;font-style:italic}
+  .toggle{position:fixed;top:10px;right:12px;z-index:10;font-size:12px;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:20px;padding:4px 10px;cursor:pointer}
+  .tokrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:flex-end}
+</style>
+</head>
+<body>
+<button class="toggle" id="themeBtn">◐ theme</button>
+<div class="wrap">
+  <header>
+    <h1>The Journey of a Token</h1>
+    <p>How a large language model actually works — followed from the point of view of a single word as it flows through the network.</p>
+    <div class="sentence">Running example: <b>"The cat sat on the ___"</b> &nbsp;→&nbsp; we ride the token <span style="color:var(--accent);font-weight:700">cat</span> until the model predicts the blank.</div>
+  </header>
+
+  <div class="tabs" id="tabs"></div>
+  <div class="stage" id="stage"></div>
+  <p class="note">Numbers here are <b>toy-sized</b> (4-dimensional vectors, tiny vocabulary) so you can watch them change. A real model uses thousands of dimensions and billions of parameters — but the mechanism on screen is the real one, just shrunk.</p>
+</div>
+
+<script>
+// ---------- toy data (illustrative, consistent across tabs) ----------
+const DIMS = ["animal","action","size","place"]; // what our 4 fake dims "mean"
+const SENT = ["The","cat","sat","on","the","___"];
+const emb = {                       // toy embeddings
+  "The":[0.1,-0.1,0.0,0.2], "cat":[0.9,-0.2,0.5,0.1], "sat":[-0.1,0.8,0.1,0.3],
+  "on":[0.0,0.1,-0.1,0.7], "the":[0.1,-0.1,0.0,0.2], "___":[0.0,0.0,0.0,0.0]
+};
+const pos1 = [0.0,0.55,0.0,0.60];   // positional encoding for position of "cat"
+const catEmbPos = emb["cat"].map((v,i)=>+(v+pos1[i]).toFixed(2));  // after +position
+const attnWeights = {"The":0.10,"cat":0.35,"sat":0.40,"on":0.08,"the":0.07};// cat attends most to "sat"
+const context = [0.31,0.42,0.24,0.26];      // toy weighted sum of values
+const afterAttn = catEmbPos.map((v,i)=>+(v+context[i]).toFixed(2)); // residual add
+const afterFFN = [0.72,0.95,0.30,0.44];     // toy output after feed-forward
+const vocab = {"mat":0.61,"floor":0.18,"couch":0.09,"hat":0.07,"dog":0.05}; // final probs
+
+// ---------- render helpers ----------
+function vec(vals,label){
+  const max=1.2;
+  const bars=vals.map(v=>{
+    const h=Math.min(Math.abs(v)/max*52,52);
+    return `<div class="bar ${v<0?'neg':''}" style="height:${Math.max(h,3)}px" title="${v}"></div>`;
+  }).join("");
+  return `<div class="tok"><div class="vec">${bars}</div>${label?`<div class="vlabel">${label}</div>`:""}</div>`;
+}
+function chip(word,cls){return `<div class="tok"><div class="chip ${cls||''}">${word}</div></div>`;}
+function arrow(){return `<div class="arrow">→</div>`;}
+function probBars(obj){
+  const entries=Object.entries(obj).sort((a,b)=>b[1]-a[1]);
+  const top=entries[0][0];
+  return `<div class="probs">`+entries.map(([w,p])=>`
+    <div class="prob ${w===top?'win':''}"><span class="w">${w}</span>
+    <span class="track"><span class="fill" style="width:${Math.round(p*100)}%"></span></span>
+    <span class="p">${Math.round(p*100)}%</span></div>`).join("")+`</div>`;
+}
+
+// ---------- tab + step content ----------
+// each step: {title, viz(html), explain(html), math?}
+const TABS = {
+"Journey":{sub:"the big picture",steps:[
+ {title:"1 · A word becomes a token",
+  viz:()=>`<div class="tokrow">${SENT.map(w=>chip(w,w==="cat"?"hot":"faded")).join("")}</div>`,
+  explain:`The model can't read letters. First the sentence is chopped into <span class="k">tokens</span> (roughly words or word-pieces) and each is swapped for an ID number. We'll follow the token <b>cat</b>. Everything after this is just math on numbers.`,
+  dive:"Embedding"},
+ {title:"2 · The token becomes a vector",
+  viz:()=>`${chip("cat","hot")}${arrow()}${vec(emb["cat"],"embedding")}`,
+  explain:`That ID is looked up in a giant table to get a <span class="k">vector</span> — a list of numbers that is the token's "meaning coordinates". Similar words get similar vectors. Ours is 4 numbers; a real one is thousands.`,
+  math:`cat → [ ${emb["cat"].join(", ")} ]  (dims ≈ ${DIMS.join(" / ")})`,
+  dive:"Embedding"},
+ {title:"3 · Add its position",
+  viz:()=>`${vec(emb["cat"],"meaning")}${arrow()}${vec(pos1,"position")}${arrow()}${vec(catEmbPos,"meaning+pos")}`,
+  explain:`The network sees all tokens at once, so it has no built-in sense of order. We add a <span class="k">positional</span> signal so "cat" knows it's the 2nd word. Now the vector encodes <b>what</b> and <b>where</b>.`,
+  math:`[ ${emb["cat"].join(", ")} ] + [ ${pos1.join(", ")} ] = [ ${catEmbPos.join(", ")} ]`},
+ {title:"4 · Into a Transformer block",
+  viz:()=>`${vec(catEmbPos,"in")}${arrow()}<div class="chip" style="padding:16px 20px">Transformer block<br><span style="font-weight:400;font-size:12px;color:var(--muted)">attention → feed-forward</span></div>${arrow()}${vec(afterFFN,"out, richer")}`,
+  explain:`This is the engine, and it does two things. <b>Attention</b>: the token looks at the other tokens and pulls in context (it learns "cat" is the thing doing the sitting). <b>Feed-forward</b>: the token is then "thought about" on its own and transformed. Dive into either below.`,
+  dive:"Attention"},
+ {title:"5 · Stack the blocks",
+  viz:()=>{let h=`<div class="tokrow">`;[catEmbPos,afterAttn,afterFFN,[0.8,1.05,0.28,0.5]].forEach((v,i)=>{h+=vec(v,"layer "+i);if(i<3)h+=arrow();});return h+`</div>`;},
+  explain:`One block isn't enough. The output feeds into another identical block, dozens of times (GPT-2 has 12, big models 100+). Early layers catch grammar; later layers catch meaning and long-range relationships. The vector gets richer at every layer.`},
+ {title:"6 · Predict the next word",
+  viz:()=>`${vec([0.8,1.05,0.28,0.5],"final")}${arrow()}${probBars(vocab)}`,
+  explain:`After the last block, the final vector is scored against every word in the vocabulary and turned into <span class="k">probabilities</span>. The highest wins — the model fills the blank with <b>"mat"</b>. Then it appends "mat" and does the whole thing again for the next word.`,
+  dive:"Prediction"},
+]},
+
+"Embedding":{sub:"ID → vector",steps:[
+ {title:"Look up the token ID",
+  viz:()=>`${chip("cat","hot")}${arrow()}<div class="matrix">row&nbsp;3412&nbsp;of the<br>embedding table</div>${arrow()}${vec(emb["cat"])}`,
+  explain:`The embedding table is just a big matrix: one <b>row per vocabulary word</b>. "cat" is token ID 3412, so we grab row 3412. That row IS the vector. These rows are learned during training.`,
+  math:`table shape = [vocab_size × dims].  Here we grab one row of 4 numbers.`},
+ {title:"Why vectors capture meaning",
+  viz:()=>`<div class="tokrow">${vec(emb["cat"],"cat")}${vec([0.85,-0.15,0.55,0.15],"kitten")}${vec([-0.1,0.8,0.1,0.3],"sat")}</div>`,
+  explain:`Because the numbers are learned, related words land near each other. <b>cat</b> and <b>kitten</b> have almost the same bars; <b>sat</b> (an action) looks totally different. "Distance between vectors" ≈ "difference in meaning". That's the whole trick that lets math operate on language.`},
+]},
+
+"Attention":{sub:"the token gathers context",steps:[
+ {title:"Make 3 versions: Query, Key, Value",
+  viz:()=>`${vec(catEmbPos,"cat")}${arrow()}<div class="tokrow">${vec([0.4,0.3,0.2,0.3],"Q")}${vec([0.5,0.2,0.3,0.4],"K")}${vec([0.3,0.5,0.2,0.2],"V")}</div>`,
+  explain:`Each token's vector is multiplied by 3 learned matrices to make a <span class="k">Query</span> ("what am I looking for?"), a <span class="k">Key</span> ("what do I offer?") and a <span class="k">Value</span> ("what I'll hand over"). Think of a search: your Query is matched against every token's Key.`,
+  math:`Q = x·Wq,   K = x·Wk,   V = x·Wv   (Wq,Wk,Wv are learned)`},
+ {title:"Score cat's Query against every Key",
+  viz:()=>`<svg width="320" height="130" viewBox="0 0 320 130">
+     ${SENT.slice(0,5).map((w,i)=>`<text x="${20+i*70}" y="120" fill="var(--muted)" font-size="12" text-anchor="middle">${w}</text>`).join("")}
+     <circle cx="160" cy="18" r="16" fill="var(--accent)"/><text x="160" y="22" fill="#fff" font-size="11" text-anchor="middle">cat</text>
+     ${SENT.slice(0,5).map((w,i)=>{const wt=attnWeights[w]||0.05;return `<line class="attnline" x1="160" y1="34" x2="${20+i*70}" y2="100" stroke-width="${1+wt*14}"/>`;}).join("")}
+   </svg>`,
+  explain:`cat's Query is compared (a dot product) with every token's Key to get a <span class="k">score</span> — how much should cat pay attention to each word? Thicker line = higher score. Here cat attends most to <b>sat</b> (its verb) and itself.`,
+  math:`score(cat, w) = Q_cat · K_w   →  The:0.10  cat:0.35  sat:0.40  on:0.08  the:0.07`},
+ {title:"Softmax the scores into weights",
+  viz:()=>probBars(attnWeights),
+  explain:`The raw scores are squashed by <span class="k">softmax</span> into weights that add up to 100%. This makes it a clean "attention budget" — cat spends most of its attention on <b>sat</b>, a bit on itself, little elsewhere.`,
+  math:`softmax turns scores → percentages that sum to 1.0`},
+ {title:"Blend the Values by those weights",
+  viz:()=>`${probBars(attnWeights)}${arrow()}${vec(context,"context")}`,
+  explain:`Now take each token's <b>Value</b> vector, multiply by its weight, and add them up. The result is a <span class="k">context vector</span> — cat's meaning, now flavored by the words it paid attention to. cat is no longer just "cat", it's "the cat that is sitting".`,
+  math:`context = Σ weight_w · V_w`},
+ {title:"Add it back (residual)",
+  viz:()=>`${vec(catEmbPos,"original")}${arrow()}<div class="arrow">+</div>${vec(context,"context")}${arrow()}${vec(afterAttn,"result")}`,
+  explain:`Crucially we <b>add</b> the context onto the original vector instead of replacing it (a <span class="k">residual connection</span>). The token keeps its own identity and gains context — and this "keep a copy" trick is what lets you stack 100 layers without the signal getting lost.`,
+  math:`out = x + context   (then a normalization step keeps numbers tidy)`},
+]},
+
+"Feed-Forward":{sub:"the token is 'thought about'",steps:[
+ {title:"Expand to a bigger space",
+  viz:()=>`${vec(afterAttn,"in (4)")}${arrow()}${vec([0.6,0.9,0.2,0.7,0.4,0.8,0.1,0.5].slice(0,4),"up (8)…")}`,
+  explain:`After attention, each token goes through a small 2-layer network — applied to every token independently. First it's <span class="k">projected up</span> into a much bigger space (e.g. 4→16, or 768→3072 in GPT-2). More room = more features it can express.`,
+  math:`h = x · W_up   (W_up expands the width ~4×)`},
+ {title:"Non-linearity (the 'thinking')",
+  viz:()=>`${vec([0.6,-0.3,0.2,-0.5],"before")}${arrow()}${vec([0.6,0.0,0.2,0.0],"after GELU")}`,
+  explain:`An <span class="k">activation function</span> (ReLU/GELU) zeroes out the unhelpful signals and keeps the useful ones. This non-linear step is what lets the network learn complex patterns instead of just doing straight-line math. It's where "if animal AND past-tense then…" type logic can live.`,
+  math:`GELU keeps positives, squashes negatives toward 0`},
+ {title:"Compress back down",
+  viz:()=>`${vec([0.6,0.0,0.2,0.0,0.4,0.5,0.0,0.3].slice(0,4),"big")}${arrow()}${vec(afterFFN,"out (4)")}`,
+  explain:`Finally it's <span class="k">projected back down</span> to the original size and added onto the input (another residual). The token leaves the block transformed — same slot, richer contents — ready for the next block.`,
+  math:`out = x + (h_activated · W_down)`},
+]},
+
+"Prediction":{sub:"vector → next word",steps:[
+ {title:"Score against every word",
+  viz:()=>`${vec([0.8,1.05,0.28,0.5],"final vec")}${arrow()}<div class="matrix">× vocabulary<br>matrix</div>${arrow()}<div class="math" style="margin:0">mat 4.1<br>floor 2.0<br>couch 1.1<br>hat 0.9<br>dog 0.5</div>`,
+  explain:`The final vector is multiplied by the vocabulary matrix to produce one raw score (a <span class="k">logit</span>) for every possible next word. Higher = the model thinks it fits better here.`,
+  math:`logits = final_vector · W_vocab   (one number per word in the vocab)`},
+ {title:"Softmax → probabilities",
+  viz:()=>probBars(vocab),
+  explain:`Softmax turns those logits into <span class="k">probabilities</span> that sum to 100%. <b>mat</b> wins with 61%. The model can either always pick the top word, or sample (which is where "temperature" and creativity come from).`,
+  math:`P(word) = softmax(logits)`},
+ {title:"Append and repeat",
+  viz:()=>`<div class="tokrow">${["The","cat","sat","on","the","mat"].map(w=>chip(w,w==="mat"?"hot":"faded")).join(" ")}</div>`,
+  explain:`"mat" is added to the sentence, and the <b>entire journey runs again</b> to predict the word after that — one token at a time. That loop, over a model trained on much of the internet, is all of it. You now know how an LLM works.`},
+]},
+};
+
+// ---------- app ----------
+let curTab="Journey", curStep=0;
+const tabsEl=document.getElementById("tabs"), stageEl=document.getElementById("stage");
+const tabNames=Object.keys(TABS);
+
+function renderTabs(){
+  tabsEl.innerHTML=tabNames.map((t,i)=>`<div class="tab ${t===curTab?'active':''}" data-t="${t}"><span class="n">${i===0?'★':i}</span>${t}</div>`).join("");
+  tabsEl.querySelectorAll(".tab").forEach(el=>el.onclick=()=>{curTab=el.dataset.t;curStep=0;render();});
+}
+function render(){
+  renderTabs();
+  const tab=TABS[curTab], step=tab.steps[curStep], n=tab.steps.length;
+  stageEl.innerHTML=`
+    <div class="stagehead"><h2>${step.title}</h2>
+      <div class="stepdots">${tab.steps.map((_,i)=>`<i class="${i<=curStep?'on':''}"></i>`).join("")}</div></div>
+    <div class="viz">${step.viz()}</div>
+    <div class="explain">${step.explain}${step.math?`<div class="math">${step.math}</div>`:""}
+      ${step.dive?`<div><span class="dive" data-dive="${step.dive}">⤵ dive into ${step.dive}</span></div>`:""}</div>
+    <div class="nav">
+      <button class="btn" id="back" ${curStep===0?'disabled':''}>← Back</button>
+      <div style="align-self:center;color:var(--muted);font-size:13px">${curTab} · step ${curStep+1} / ${n}</div>
+      <button class="btn primary" id="next" ${curStep===n-1?'disabled':''}>Next →</button>
+    </div>`;
+  document.getElementById("next").onclick=()=>{if(curStep<n-1){curStep++;render();}};
+  document.getElementById("back").onclick=()=>{if(curStep>0){curStep--;render();}};
+  const dive=stageEl.querySelector(".dive");
+  if(dive)dive.onclick=()=>{curTab=dive.dataset.dive;curStep=0;render();window.scrollTo({top:0,behavior:'smooth'});};
+}
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowRight")document.getElementById("next")?.click();
+  if(e.key==="ArrowLeft")document.getElementById("back")?.click();
+});
+// theme toggle
+const root=document.documentElement, tb=document.getElementById("themeBtn");
+tb.onclick=()=>{const cur=root.getAttribute("data-theme")|| (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");root.setAttribute("data-theme",cur==="dark"?"light":"dark");};
+render();
+</script>
+</body>
+</html>
