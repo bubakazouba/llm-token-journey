@@ -244,6 +244,25 @@ const TABS={
    explain:`The chosen word "mat" is appended, and the <b>entire journey runs again</b> to predict the word after that — one token at a time. That loop, over a model trained on much of the internet, is all of it. You now know how an LLM works.`},
  ]},
 }},
+
+"Putting it together":{subs:{
+ "Parallel, not merged":{steps:[
+  {title:"Every token has its OWN vector",viz:()=>`<div class="tokrow">${SENT.map((w,i)=>`<div class="tok"><div class="chip ${w==='cat'?'hot':''}" style="font-size:13px">${w}</div>${vec([0.2+i*.1,0.5-i*.08,0.3,0.1+i*.05].map(x=>+x.toFixed(2)))}</div>`).join("")}</div>`,
+   explain:`Common confusion: the token vectors are <b>never</b> pooled or averaged together. Each token keeps its own separate vector through the whole stack. Embedding, feed-forward, layernorm — all applied to each token independently, in parallel.`},
+ ]},
+ "Attention = the only mixing":{steps:[
+  {title:"...and it only flows left-to-right",viz:()=>`<svg width="360" height="150" viewBox="0 0 360 150">${SENT.map((w,i)=>`<circle cx="${28+i*61}" cy="112" r="15" fill="${w==='cat'?'var(--accent)':'var(--panel2)'}" stroke="var(--line)"/><text x="${28+i*61}" y="116" font-size="10" text-anchor="middle" fill="${w==='cat'?'#fff':'var(--muted)'}">${w}</text>`).join("")}${[[5,0],[5,1],[5,2],[5,3],[5,4],[3,1],[3,2],[2,0]].map(([a,b])=>`<path class="attnline" d="M ${28+a*61} 97 Q ${28+(a+b)/2*61} ${40} ${28+b*61} 97" stroke-width="1.6" opacity="0.6"/>`).join("")}</svg>`,
+   explain:`The ONE place tokens share information is <span class="k">attention</span>. And a rule called <b>causal masking</b> means each token can attend only to itself and the tokens <b>before</b> it — never future ones. So context flows strictly left-to-right (notice: no arrows point right).`,dive:["Attention",null]},
+  {title:"Each vector absorbs its left context",viz:()=>`<div class="tokrow">${chip("The")}${chip("cat")}${chip("sat")}${chip("on")}${chip("the")}${chip("___","hot")}</div>`,
+   explain:`Stack enough attention layers and, by the time you reach the last position, its vector has legally soaked up everything to its left. It's still one token's vector — but it now summarizes the whole sentence so far.`},
+ ]},
+ "Only the last vector predicts":{steps:[
+  {title:"Read off the final position",viz:()=>`<div class="tokrow">${SENT.map(w=>chip(w,w==='___'?'hot':'faded')).join("")}</div><div class="arrow">↓</div>${vec([0.8,1.05,0.28,0.5],"last vector")}${arrow()}${probBars(vocab,true)}`,
+   explain:`To predict the next word, the model looks at exactly <b>one</b> vector: the final vector at the <b>last position</b> (the "___"). Not a blend of all of them — just that one, which already contains the whole left context. That vector becomes the probabilities. <b>This is the answer to "where did all the tokens go":</b> they stayed separate; only the last one is read out.`,dive:["Prediction",null]},
+  {title:"Training does all positions at once",viz:()=>`<div class="tokrow">${["The→cat","cat→sat","sat→on","on→the","the→mat"].map(t=>chip(t)).join("")}</div>`,
+   explain:`Bonus: during <b>training</b>, every position predicts its own next token simultaneously (position 1 predicts "cat", position 2 predicts "sat", ...). That's why training is efficient — one pass teaches the model at every slot. At generation time you just use the last slot's output, append it, and run again.`},
+ ]},
+}},
 };
 
 // ---- app with 2-level tabs ----
